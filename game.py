@@ -81,7 +81,7 @@ if os.path.exists(ANTEATER_PNG):
 
 # Import auth helpers
 try:
-    from auth import signup, login, add_score, get_top_scores
+    from auth import signup, login, add_score, get_top_scores, is_admin, delete_user_scores
 except Exception:
     # If auth is unavailable at import time, provide stubs so the game still runs
     def signup(u, p):
@@ -533,6 +533,12 @@ settings_username_input = TextInput(250, 200, 300, 40, '')
 settings_password_input = TextInput(250, 260, 300, 40, '', hidden=True)
 settings_message = ''
 
+# --- Admin State ---
+show_admin = False
+is_current_user_admin = False
+admin_target_input = TextInput(200, 280, 400, 40, '')
+admin_message = ''
+
 def point_in_polygon(x, y, polygon):
     # ray casting algorithm for point in polygon (polygon as list of (x,y))
     inside = False
@@ -632,17 +638,30 @@ while running:
         if show_settings:
             settings_username_input.handle_event(event)
             settings_password_input.handle_event(event)
+        
+        # If admin menu is open, route events to admin inputs
+        if show_admin:
+            admin_target_input.handle_event(event)
 
         if event.type == pygame.KEYDOWN:
             if event.key == pygame.K_ESCAPE and current_player_id is not None:
                 # Toggle settings menu (only when logged in)
-                show_settings = not show_settings
-                if show_settings:
-                    # Pre-fill current username if available
-                    settings_username_input.text = username_input.text
-                    settings_password_input.text = ''
-                    settings_message = ''
-            elif not show_settings:  # Only handle game controls when settings not open
+                if show_admin:
+                    show_admin = False
+                else:
+                    show_settings = not show_settings
+                    if show_settings:
+                        # Pre-fill current username if available
+                        settings_username_input.text = username_input.text
+                        settings_password_input.text = ''
+                        settings_message = ''
+            elif event.key == pygame.K_F1 and current_player_id is not None and is_current_user_admin:
+                # Toggle admin menu (F1 key for admins only)
+                show_admin = not show_admin
+                if show_admin:
+                    admin_target_input.text = ''
+                    admin_message = ''
+            elif not show_settings and not show_admin:  # Only handle game controls when menus not open
                 if event.key == pygame.K_SPACE:
                     # start extending
                     anteater.extending = True
@@ -658,20 +677,20 @@ while running:
                     anteater.loop_path = []
                     anteater.loop_cells = set()
                     anteater.capture_timer = 0
-        if event.type == pygame.KEYUP and not show_settings:
+        if event.type == pygame.KEYUP and not show_settings and not show_admin:
             if event.key == pygame.K_SPACE:
                 # stop extending, start retracting
                 anteater.extending = False
                 anteater.retracting = True
 
-    # read continuous key state for turning (only when settings not open)
-    if not show_settings:
+    # read continuous key state for turning (only when menus not open)
+    if not show_settings and not show_admin:
         keys = pygame.key.get_pressed()
         anteater.handle_input(keys)
 
     # --- Update ---
-    # Only update game when not paused by settings, login, or game over
-    if not show_settings:
+    # Only update game when not paused by menus, login, or game over
+    if not show_settings and not show_admin:
         anteater.update()
         for ant in ants:
             # Only update ants when not paused by login overlay or showing scores
@@ -868,9 +887,14 @@ while running:
     anteater.draw(screen)
     
     # Show settings hint when logged in and not in other menus
-    if current_player_id is not None and not show_scores and not show_settings:
+    if current_player_id is not None and not show_scores and not show_settings and not show_admin:
         hint_text = font.render('Press ESC for Settings', True, (100, 100, 100))
         screen.blit(hint_text, (WIDTH - hint_text.get_width() - 10, 10))
+        
+        # Show admin hint for admin users
+        if is_current_user_admin:
+            admin_hint = font.render('Press F1 for Admin', True, (100, 100, 100))
+            screen.blit(admin_hint, (WIDTH - admin_hint.get_width() - 10, 35))
 
     # If dead/show_scores, draw overlay with top scores and options
     if show_scores:
@@ -967,6 +991,7 @@ while running:
                 try:
                     pid = login(username_input.text, password_input.text)
                     current_player_id = pid
+                    is_current_user_admin = is_admin(pid)
                     game_start_ticks = pygame.time.get_ticks()
                     auth_message = 'Logged in'
                 except Exception as e:
@@ -975,6 +1000,7 @@ while running:
                 try:
                     pid = signup(username_input.text, password_input.text)
                     current_player_id = pid
+                    is_current_user_admin = is_admin(pid)
                     game_start_ticks = pygame.time.get_ticks()
                     auth_message = 'Account created & logged in'
                 except Exception as e:
@@ -1041,6 +1067,56 @@ while running:
             if cancel_btn.collidepoint((mx,my)):
                 show_settings = False
                 settings_message = ''
+
+    # Admin menu overlay (only for admins)
+    if show_admin and current_player_id is not None and is_current_user_admin:
+        overlay = pygame.Surface((WIDTH, HEIGHT), pygame.SRCALPHA)
+        overlay.fill((0,0,0,180))
+        screen.blit(overlay, (0,0))
+        
+        title = font.render('Admin Panel', True, WHITE)
+        screen.blit(title, (WIDTH//2 - title.get_width()//2, 100))
+        
+        # Target username input
+        target_label = font.render('Username to remove scores:', True, WHITE)
+        screen.blit(target_label, (200, 250))
+        admin_target_input.draw(screen)
+        
+        # Buttons
+        delete_btn = pygame.Rect(200, 350, 180, 40)
+        cancel_btn = pygame.Rect(400, 350, 140, 40)
+        pygame.draw.rect(screen, (200,50,50), delete_btn)
+        pygame.draw.rect(screen, (100,100,100), cancel_btn)
+        screen.blit(font.render('Delete Scores', True, WHITE), (delete_btn.x + 20, delete_btn.y + 6))
+        screen.blit(font.render('Cancel', True, WHITE), (cancel_btn.x + 30, cancel_btn.y + 6))
+        
+        # Instructions
+        instr1 = font.render('Press F1 to close admin panel', True, (200,200,200))
+        screen.blit(instr1, (WIDTH//2 - instr1.get_width()//2, 420))
+        
+        # Message
+        if admin_message:
+            msg = font.render(admin_message, True, (255,220,220))
+            screen.blit(msg, (WIDTH//2 - msg.get_width()//2, 450))
+        
+        # Handle button clicks
+        if pygame.mouse.get_pressed()[0]:
+            mx, my = pygame.mouse.get_pos()
+            if delete_btn.collidepoint((mx,my)):
+                target_user = admin_target_input.text.strip()
+                if target_user:
+                    try:
+                        deleted_count = delete_user_scores(current_player_id, target_user)
+                        admin_message = f'Deleted {deleted_count} scores for {target_user}'
+                        admin_target_input.text = ''
+                    except Exception as e:
+                        admin_message = f'Delete failed: {e}'
+                else:
+                    admin_message = 'Please enter a username'
+            
+            if cancel_btn.collidepoint((mx,my)):
+                show_admin = False
+                admin_message = ''
 
     # show capture countdown when loop is active and trapped ants exist
     if anteater.loop_active and anteater.trapped_ants:

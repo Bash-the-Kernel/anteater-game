@@ -7,12 +7,12 @@ Usage (PowerShell):
 Make sure DB env vars are set or default DB config matches your local MySQL.
 """
 import sys
-from auth import ensure_tables, signup, login, get_top_scores, add_score
+from auth import ensure_tables, signup, login, get_top_scores, add_score, make_admin
 
 
 def main():
     if len(sys.argv) < 2:
-        print('Usage: auth_test_cli.py <signup|login|schema|topscores> [args]')
+        print('Usage: auth_test_cli.py <signup|login|schema|topscores|makeadmin> [args]')
         return
     cmd = sys.argv[1]
     if cmd == 'schema':
@@ -52,6 +52,16 @@ def main():
         s = int(sys.argv[3])
         add_score(pid, s)
         print('score added')
+    elif cmd == 'makeadmin':
+        if len(sys.argv) != 3:
+            print('Usage: makeadmin <username>')
+            return
+        username = sys.argv[2]
+        try:
+            make_admin(username)
+            print(f'Made {username} an admin')
+        except Exception as e:
+            print('Make admin failed:', e)
     else:
         print('unknown command')
 

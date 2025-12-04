@@ -27,7 +27,8 @@ def ensure_tables():
             player_id INT AUTO_INCREMENT PRIMARY KEY,
             username VARCHAR(64) NOT NULL UNIQUE,
             password_hash VARBINARY(128) NOT NULL,
-            date_created DATETIME NOT NULL
+            date_created DATETIME NOT NULL,
+            is_admin BOOLEAN DEFAULT FALSE
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
         """,
         """
@@ -59,6 +60,14 @@ def ensure_tables():
         # migration: ensure 'level' column exists on scores (add if missing)
         try:
             cur.execute("ALTER TABLE scores ADD COLUMN level INT NOT NULL DEFAULT 1")
+            conn.commit()
+        except Exception:
+            # ignore if column exists or any other issue; it's a best-effort migration
+            conn.rollback()
+        
+        # migration: ensure 'is_admin' column exists on players (add if missing)
+        try:
+            cur.execute("ALTER TABLE players ADD COLUMN is_admin BOOLEAN DEFAULT FALSE")
             conn.commit()
         except Exception:
             # ignore if column exists or any other issue; it's a best-effort migration
@@ -188,6 +197,50 @@ def update_user_credentials(player_id: int, new_username: str, new_password: str
         except mysql.connector.IntegrityError as e:
             # duplicate username -> unique constraint violation
             raise ValueError('username already exists') from e
+    finally:
+        cur.close()
+        conn.close()
+
+
+def is_admin(player_id: int) -> bool:
+    """Check if a player is an admin."""
+    conn = get_db_connection()
+    try:
+        cur = conn.cursor()
+        cur.execute("SELECT is_admin FROM players WHERE player_id = %s", (player_id,))
+        row = cur.fetchone()
+        return bool(row and row[0]) if row else False
+    finally:
+        cur.close()
+        conn.close()
+
+
+def delete_user_scores(admin_id: int, target_username: str):
+    """Delete all scores for a user (admin only)."""
+    if not is_admin(admin_id):
+        raise ValueError('admin access required')
+    
+    conn = get_db_connection()
+    try:
+        cur = conn.cursor()
+        cur.execute("DELETE s FROM scores s JOIN players p ON s.player_id = p.player_id WHERE p.username = %s", (target_username,))
+        deleted_count = cur.rowcount
+        conn.commit()
+        return deleted_count
+    finally:
+        cur.close()
+        conn.close()
+
+
+def make_admin(username: str):
+    """Promote a user to admin status."""
+    conn = get_db_connection()
+    try:
+        cur = conn.cursor()
+        cur.execute("UPDATE players SET is_admin = TRUE WHERE username = %s", (username,))
+        if cur.rowcount == 0:
+            raise ValueError('user not found')
+        conn.commit()
     finally:
         cur.close()
         conn.close()
